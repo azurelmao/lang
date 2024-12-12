@@ -719,11 +719,7 @@ fn optimize_expression(const_vars: &mut HashMap<&'static str, i32>, expression: 
         },
         Expression::Call {identifier, arguments} => {
             let arguments = arguments.iter().map(|arg| {
-                let opt_arg = optimize_expression(const_vars, arg);
-                match opt_arg {
-                    Expression::Number(number) => Expression::Number(number),
-                    _ => opt_arg
-                }
+                optimize_expression(const_vars, arg)
             }).collect();
             Expression::Call {identifier, arguments}
         },
