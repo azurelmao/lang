@@ -85,6 +85,10 @@ enum Statement {
     },
     Return {
         expression: Expression
+    },
+    If {
+        expression: Expression,
+        block: Vec<Statement>
     }
 }
 
@@ -109,6 +113,15 @@ impl Display for Statement {
             },
             Statement::Return { expression } => {
                 write!(f, "  return {}", expression)?;
+            },
+            Statement::If {expression, block} => {
+                write!(f, " if {} {{\n", expression)?;
+
+                for statement in block.iter() {
+                    write!(f, "{}\n", statement)?;
+                }
+
+                write!(f, "}}")?;
             }
         }
 
@@ -465,6 +478,22 @@ fn read_statement(index: &mut usize, tokens: &[Token]) -> Statement {
 
             Statement::Return {expression}
         },
+        Some(Token::If) => {
+            *index += 1;
+
+            let expression = match read_expression(index, tokens) {
+                Some(expression) => expression,
+                _ => panic!("Expected expression after return statement, got {:#?}", tokens.get(*index))
+            };
+
+            *index += 1;
+            let block = match tokens.get(*index) {
+                Some(Token::LeftBrace) => read_block(index, tokens),
+                _ => panic!("Expected left brace, got {:#?}", tokens.get(*index))
+            };
+
+            Statement::If {expression, block}
+        },
         _ => panic!("Expected identifier, got {:#?}", tokens.get(*index))
     }
 }
@@ -690,6 +719,16 @@ fn optimize_expression(const_vars: &mut HashMap<&'static str, i32>, expression: 
                         expression: Box::new(opt_expr)
                     }
                 },
+                Expression::Assignment {identifier: identifier2, .. } => {
+                    if const_vars.contains_key(identifier2) {
+                        const_vars.insert(identifier, const_vars.get(identifier2).unwrap().clone());
+                    }
+
+                    Expression::Assignment {
+                        identifier: *identifier,
+                        expression: Box::new(opt_expr)
+                    }
+                },
                 _ => {
                     if const_vars.contains_key(identifier) {
                         const_vars.remove(identifier);
@@ -734,35 +773,49 @@ fn optimize_expression(const_vars: &mut HashMap<&'static str, i32>, expression: 
     }
 }
 
+fn optimize_statement(const_vars: &mut HashMap<&'static str, i32>, statement: &Statement) -> Statement {
+    match statement {
+        Statement::Assignment {identifier, expression} => {
+            let assignment = Expression::Assignment {
+                identifier,
+                expression: Box::new(expression.clone())
+            };
+            match optimize_expression(const_vars, &assignment) {
+                Expression::Assignment { identifier, expression } => {
+                    Statement::Assignment {identifier, expression: *expression}
+                }
+                _ => panic!("Impossible")
+            }
+        },
+        Statement::Return {expression} => {
+            let opt_expr = optimize_expression(const_vars, expression);
+            Statement::Return {expression: opt_expr}
+        }
+        Statement::Call {identifier, arguments} => {
+            let arguments = arguments.iter().map(|arg| {
+                optimize_expression(const_vars, arg)
+            }).collect();
+            Statement::Call {identifier, arguments}
+        },
+        Statement::If {expression, block} => {
+            let mut opt_block = Vec::new();
+
+            for statement in block.iter() {
+                let opt_statement = optimize_statement(const_vars, statement);
+                opt_block.push(opt_statement);
+            }
+
+            Statement::If {expression: expression.clone(), block: opt_block}
+        }
+    }
+}
+
 fn optimize_function(function: &Function) -> Function {
     let mut const_vars = HashMap::<&'static str, i32>::new();
     let mut block = Vec::new();
 
     for statement in function.block.iter() {
-        let opt_statement = match statement {
-            Statement::Assignment {identifier, expression} => {
-                let assignment = Expression::Assignment {
-                    identifier,
-                    expression: Box::new(expression.clone())
-                };
-                match optimize_expression(&mut const_vars, &assignment) {
-                    Expression::Assignment { identifier, expression } => {
-                        Statement::Assignment {identifier, expression: *expression}
-                    }
-                    _ => panic!("Impossible")
-                }
-            },
-            Statement::Return {expression} => {
-                let opt_expr = optimize_expression(&mut const_vars, expression);
-                Statement::Return {expression: opt_expr}
-            }
-            Statement::Call {identifier, arguments} => {
-                let arguments = arguments.iter().map(|arg| {
-                    optimize_expression(&mut const_vars, arg)
-                }).collect();
-                Statement::Call {identifier, arguments}
-            },
-        };
+        let opt_statement = optimize_statement(&mut const_vars, statement);
         block.push(opt_statement);
     }
 
@@ -785,8 +838,9 @@ fn optimize_ast(program: &Program) -> Program {
 }
 
 fn test<T>(text: &'static str, function: fn(&mut usize, &[Token]) -> T) where T: std::fmt::Debug {
-    println!("=========================================");
     let tokens = tokenize(text);
+    println!("{:#?}", tokens);
+
     let mut index = 0;
     let ast = function(&mut index, &tokens);
     println!("{:#?}, index at: {:?}", ast, tokens.get(index));
@@ -811,15 +865,21 @@ fn main() {
     //     foo(a, b);
     // }", read_function);
 
-    let text = "
-    main() {
-        a = 1 + 1;
-        a = 1 + a;
-        return a;
-    }
-    ";
-    let tokens = tokenize(text);
-    let ast = build_ast(&tokens);
-    let opt_ast = optimize_ast(&ast);
-    println!("{ast}\n{opt_ast}");
+    test("if 1 {}", read_statement);
+
+    // let text = "
+    // main() {
+    //     a = 1;
+    //
+    //     if a {
+    //       a = 2;
+    //     }
+    //
+    //     return a;
+    // }
+    // ";
+    // let tokens = tokenize(text);
+    // let ast = build_ast(&tokens);
+    // let opt_ast = optimize_ast(&ast);
+    // println!("{ast}\n{opt_ast}");
 }

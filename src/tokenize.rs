@@ -11,7 +11,8 @@ pub enum Token {
     Comma,
     Colon,
     Semicolon,
-    Return
+    Return,
+    If
 }
 
 fn read_identifier(index: &mut usize, chars: &[char], first_char: char) -> &'static str {
@@ -75,6 +76,7 @@ pub fn tokenize(text: &'static str) -> Vec<Token> {
                 let identifier = read_identifier(&mut index, &chars, c);
                 match identifier {
                     "return" => Token::Return,
+                    "if" => Token::If,
                     _ => Token::Identifier(identifier)
                 }
             },
